@@ -49,6 +49,9 @@ class FracFlow(object):
         kroe, no, Sorw: oil relperm
         muo, muw, mup:  viscosities of oil, water and polymer solution 
                         polymer solution viscosity is at injection concentration
+        Bw, Bo:         formation volume factors of water resp. oil. They should
+                        be specified in rm3/sm3. They are only used for the calculation of
+                        the water cut at reservoir conditions.
         ad1, ad2:       adsorption parameter for Langmuir isotherm
         nSw:            number of water saturation values used in the look-up
                         table for rarefaction wave calculations. By default nSw=5001.
@@ -78,8 +81,8 @@ class FracFlow(object):
     '''
     
     def __init__(self, krwe=None, nw=None, Scw=None, kroe=None, no=None, Sorw=None,
-                 muo=None, muw=None, mup=None, ad1=None, ad2=None, nSw=5001, 
-                 eps_Sw1=1e-8, eps_Sw2=1e-8, eps_Sw3=1e-8, epsAds=1e-8, epsSvel=1e-8, xtol=1e-15,
+                 muo=None, muw=None, mup=None, ad1=None, ad2=None, Bw=1.0, Bo=1.0, nSw=5001, 
+                 eps_Sw1=1e-6, eps_Sw2=1e-6, eps_Sw3=1e-6, epsAds=1e-6, epsSvel=1e-6, xtol=1e-15,
                  params_dict=None, debug = False):
 
         # If a dictionary is provided, use its values unless explicit values are provided
@@ -96,6 +99,8 @@ class FracFlow(object):
             ad1  = ad1  if ad1  is not None else params_dict.get('ad1')
             ad2  = ad2  if ad2  is not None else params_dict.get('ad2')
             # For the following parameters, keep the default if not provided
+            Bw      = params_dict.get('Bw', Bw) 
+            Bo      = params_dict.get('Bo', Bo) 
             nSw     = params_dict.get('nSw', nSw) 
             eps_Sw1 = params_dict.get('eps_Sw1', eps_Sw1)
             eps_Sw2 = params_dict.get('eps_Sw1', eps_Sw2)
@@ -124,6 +129,9 @@ class FracFlow(object):
         self.mup  = mup   # viscosity of polymer solution at injection concentration
         self.ad1  = ad1   # adsorption parameter Langmuir isotherm
         self.ad2  = ad2   # adsorption parameter Langmuir isotherm
+        self.Bw   = Bw    # water formation volume factor
+        self.Bo   = Bo    # oil formation volume factor
+        self.muw  = muw   # water viscosity
         self.nSw  = nSw   # number of saturation values in the lookup tables for rarefaction
 
         # Parameter checking
@@ -150,6 +158,10 @@ class FracFlow(object):
             errors['ad1'] = 'ad1 must be larger than or equal to 0'
         if (self.ad1 >0) and  (self.ad2 <=0):
             errors['ad2'] = 'ad2 must be larger than 0 if ad1 > 0'
+        if self.Bw <=0:
+            errors['Bw'] = 'Bw must be larger than 0'
+        if self.Bo <=0:
+            errors['Bo'] = 'Bo must be larger than 0'
         if self.Scw >= 1-self.Sorw:
             errors['Scw_Sorw'] = 'Scw must be less than 1-Sorw'
         if self.muw > self.mup:
@@ -981,7 +993,7 @@ class FracFlow(object):
                     return Sb(t)
                 else:
                     return Sc(t)
-            if self.events == 'rare + shock':
+            elif self.events == 'rare + shock':
                 # Solution B
                 v1 = self.shockC_vel(C=1,Swst=self.Sw2,Cst=0)
                 v3 = self.lamS(self.Sw2,C=0)
@@ -1025,7 +1037,7 @@ class FracFlow(object):
                 return Se(t)
             else:
                 return Sc(t)
-        
+                    
     def calc_RF(self,t,wrtSwi=False):
         '''
         This function calculates the recovery factor at tD=t.
@@ -1040,8 +1052,93 @@ class FracFlow(object):
         else:
             Sini = self.Scw
         return (self.calc_Savg(t) - Sini) / (1.0 - Sini)
+    
+    def calc_quad_points(self, t, xstart=0.0, xend=1.0, eps=1e-4, ns = 101):
+        '''
+        This function is used for two purposes:
+        1) it generates the 'points' input data for the SciPy integration 
+           routine 'quad' used in 'plot_Savg_Integration'.
+        2) it generates an array xs for plotting the saturation and polymer
+           concentration profiles in 'plot_profile'
 
-    def plot_profile(self, PVs, xstart=0.0, xend=1.0, ns = 101, sizex = 6, sizey = 4):
+        This is done by identifying the x-coordinates where the profile switches
+        from rarefactions to shocks and vice versa.
+        The xs data is made detailed in the rarefactions and less detailed elsewhere.
+        '''
+        # The 'points' dataframe tracks the switch points between rarefactions
+        # and shocks. It also tracks whether higher resolution x data is required
+        # before / after a switch point.
+        points = pd.DataFrame(columns=['before', 'after'])
+        points.index.name = 'x'
+
+        if self.lowSwi:
+            # This branch is for Swi <= Sw2_alt
+            if self.events == 'shock':
+                # Solution A
+                v1 = self.shockC_vel(C=1,Swst=self.Sw2,Cst=0)
+                v2 = self.shockS_vel(self.Sw2, self.Swi,Cst=0)
+                points.loc[v1*t] = True,  False
+                points.loc[v2*t] = False, False
+            elif self.events == 'rare + shock':
+                # Solution B
+                v1 = self.shockC_vel(C=1,Swst=self.Sw2,Cst=0)
+                v3 = self.lamS(self.Sw2,C=0)
+                v4 = self.shockS_vel(self.Sw3,self.Swi,Cst=0)
+                points.loc[v1*t] = True,  False
+                points.loc[v3*t] = False, True
+                points.loc[v4*t] = True,  False
+            else:
+                # Solution C    
+                v1 = self.shockC_vel(C=1,Swst=self.Sw2,Cst=0)
+                v3 = self.lamS(self.Sw2,C=0)
+                v5 = self.lamS(self.Swi,C=0)
+                points.loc[v1*t] = True,  False
+                points.loc[v3*t] = False, True
+                points.loc[v5*t] = True,  False
+        else:
+            # This branch is for Swi > Sw2_alt
+            v5 = self.lamS(self.Sw1_hi,C=1)
+            v6 = self.shockC_vel(C=1,Swst=self.Swi,Cst=0)
+            points.loc[v5*t] = True,  False
+            points.loc[v6*t] = False, False
+        # Only keep switch points that are between xstart and xend
+        point_drop = []
+        for point in points.index:
+            if not ((point>xstart) and (point<xend)): point_drop.append(point)
+
+        points.drop(index=point_drop, inplace=True)
+        points.reset_index(inplace=True)
+
+        # Generate x data between xstart and xend. Give more resolutions in the rarefactions.
+        if (points.shape[0]>=1):
+            # Calculate the number of rarefaction intervals
+            nDetail = points.loc[0,'before'] + points['after'].sum()
+            if nDetail > 0:
+                nx = int(ns/nDetail)
+            else:
+                nx = 3
+            #
+            if points.loc[0,'before']:
+                xs = np.linspace(xstart,points.loc[0,'x']-eps,nx)
+            else:
+                xs = np.linspace(xstart,points.loc[0,'x']-eps,3)
+            xs = np.append(xs,[points.loc[0,'x']])
+            for i in range(1,points.shape[0]):
+                if points.loc[i,'before']:
+                    xs = np.append(xs, np.linspace(points.loc[i-1,'x']+eps, points.loc[i,'x']-eps,nx))
+                else:
+                    xs = np.append(xs, np.linspace(points.loc[i-1,'x']+eps, points.loc[i,'x']-eps,3))
+                xs = np.append(xs,[points.loc[i,'x']])
+            if points.iloc[-1]['after']:
+                xs = np.append(xs,np.linspace(points['x'].iloc[-1]+eps, xend, nx))
+            else:
+                xs = np.append(xs,np.linspace(points['x'].iloc[-1]+eps, xend, 3))
+        else:
+            xs = np.linspace(xstart, xend, ns)
+
+        return points['x'].to_list(), xs
+
+    def plot_profile(self, PVs, xstart=0.0, xend=1.0, ns = 101, eps=1e-4, sizex = 6, sizey = 4):
         '''
         This function plots the profiles of the water saturation Sw and normalized polymer
         concentration C for the FracFlow instance in the interval xstart <= xD <= xend 
@@ -1063,13 +1160,25 @@ class FracFlow(object):
         if isinstance(PVs, (int, float)):
             PVs = [PVs]
         
-        xs = np.linspace(xstart,xend,ns)
-
         for PV in PVs:
             fig, ax = plt.subplots(figsize=(sizex,sizey))
             data = pd.Series()
             dataC = pd.Series()
             t = PV
+
+            # points = self.calc_quad_points(t, xstart, xend)
+            # if len(points) >=1:
+            #     nx = int(ns/len(points))
+            #     xs = np.linspace(xstart,points[0]-eps,nx)
+            #     xs = np.append(xs,[points[0]])
+            #     for i in range(1,len(points)):
+            #         xs = np.append(xs, np.linspace(points[i-1]+eps,points[i]-eps,nx))
+            #         xs = np.append(xs, [points[i]])
+            #     xs = np.append(xs,np.linspace(points[-1]+eps,xend, nx))
+            # else:
+            #     xs = np.linspace(xstart,xend,ns)
+            points, xs = self.calc_quad_points(t, xstart, xend, eps, ns)
+
             for x in xs:
                 data[x] = self.calc_Sol(x,t)
                 dataC[x] = self.calc_SolC(x,t)
@@ -1085,42 +1194,89 @@ class FracFlow(object):
 
         return data, dataC, fig, ax
 
-    def calc_quad_points(self, t,eps=1e-8):
+    def calc_PVs(self, PVstart=0.0, PVend=2.0, eps = 1e-4, ns=101):
         '''
-        This function generates the 'points' input data for the SciPy integration 
-        routine 'quad' used in 'plot_Savg_Integration'.
-        It specifies the discontinuitiess in the water saturation profile.
+        This function is generates an array PVs for plotting the time/injected PV based
+        data in 'plot_Savg_Integration', 'plot_Savg' and 'plot_RF'.
+
+        This is done by identifying the moments where the profile switches
+        from rarefactions to shocks and vice versa.
+        The PVs data is made detailed in the rarefactions and less detailed elsewhere.
         '''
+        # The 'tBs' dataframe tracks the switch points between rarefactions
+        # and shocks. It also tracks whether higher resolution time data is required
+        # before / after a switch point.
+        tBs = pd.DataFrame(columns=['before', 'after'])
+        tBs.index.name = 'tB'
+
         if self.lowSwi:
             # This branch is for Swi <= Sw2_alt
             if self.events == 'shock':
                 # Solution A
                 v1 = self.shockC_vel(C=1,Swst=self.Sw2,Cst=0)
                 v2 = self.shockS_vel(self.Sw2, self.Swi,Cst=0)
-                xs = [v1*t,v2*t]
-            if self.events == 'rare + shock':
+                tBs.loc[1.0/v2] = False, False
+                tBs.loc[1.0/v1] = False, True
+            elif self.events == 'rare + shock':
                 # Solution B
                 v1 = self.shockC_vel(C=1,Swst=self.Sw2,Cst=0)
                 v3 = self.lamS(self.Sw2,C=0)
                 v4 = self.shockS_vel(self.Sw3,self.Swi,Cst=0)
-                xs = [v1*t,v3*t,v4*t]
+                tBs.loc[1.0/v4] = False, True
+                tBs.loc[1.0/v3] = True,  False 
+                tBs.loc[1.0/v1] = False, True
             else:
                 # Solution C    
                 v1 = self.shockC_vel(C=1,Swst=self.Sw2,Cst=0)
                 v3 = self.lamS(self.Sw2,C=0)
                 v5 = self.lamS(self.Swi,C=0)
-                xs=[v1*t,v3*t,v5*t]
+                tBs.loc[1.0/v5] = False, True
+                tBs.loc[1.0/v3] = True,  False
+                tBs.loc[1.0/v1] = False, True
         else:
             # This branch is for Swi > Sw2_alt
             v5 = self.lamS(self.Sw1_hi,C=1)
             v6 = self.shockC_vel(C=1,Swst=self.Swi,Cst=0)
-            xs = [v5*t,v6*t]
-        points = []
-        for x in xs:
-            if (x>0) and (x<1): points.append(x)
-        return points
+            tBs.loc[1.0/v6] = False, False
+            tBs.loc[1.0/v5] = False, True
+        # Only keep switch points that are between PVstart and PVend
+        tB_drop = []
+        for tB in tBs.index:
+            if not ((tB>PVstart) and (tB<PVend)): tB_drop.append(tB)
 
-    def plot_Savg_Integration(self, PVstart=0.0, PVend=2.0, ns = 41, quad_eps=1e-5):
+        tBs.drop(index=tB_drop, inplace=True)
+        tBs.reset_index(inplace=True)
+
+        # Generate time data between PVstart and PVend. Give more resolutions in the rarefactions.
+        if (tBs.shape[0]>=1):
+            # Calculate the number of rarefaction intervals
+            nDetail = tBs.loc[0,'before'] + tBs['after'].sum()
+            if nDetail > 0:
+                nPV = int(ns/nDetail)
+            else:
+                nPV = 3
+            #
+            if tBs.loc[0,'before']:
+                PVs = np.linspace(PVstart,tBs.loc[0,'tB']-eps,nPV)
+            else:
+                PVs = np.linspace(PVstart,tBs.loc[0,'tB']-eps,3)
+            PVs = np.append(PVs,[tBs.loc[0,'tB']])
+            for i in range(1,tBs.shape[0]):
+                if tBs.loc[i,'before']:
+                    PVs = np.append(PVs, np.linspace(tBs.loc[i-1,'tB']+eps, tBs.loc[i,'tB']-eps,nPV))
+                else:
+                    PVs = np.append(PVs, np.linspace(tBs.loc[i-1,'tB']+eps, tBs.loc[i,'tB']-eps,3))
+                PVs = np.append(PVs,[tBs.loc[i,'tB']])
+            if tBs.iloc[-1]['after']:
+                PVs = np.append(PVs,np.linspace(tBs['tB'].iloc[-1]+eps, PVend, nPV))
+            else:
+                PVs = np.append(PVs,np.linspace(tBs['tB'].iloc[-1]+eps, PVend, 3))
+        else:
+            PVs = np.linspace(PVstart, PVend, ns)
+
+        return PVs
+
+    def plot_Savg_Integration(self, PVstart=0.0, PVend=2.0, ns = 41, eps=1e-4, quad_eps=1e-5):
         '''
         This function plots the average water saturation as function of PV injected for
         an instance of FracFlow. The average water saturation is calculated by integrating
@@ -1137,10 +1293,13 @@ class FracFlow(object):
         Savg:       Savg vs PV data in the plot
         fig, ax:    figure and axes data of the plot
         '''
-        PVs = np.linspace(PVstart, PVend, ns)
+
+        PVs = self.calc_PVs(PVstart, PVend, eps, ns)
+
         Savg = pd.Series()
         for PV in PVs:
             points = self.calc_quad_points(PV)
+            points, xs = self.calc_quad_points(PV)
             Savg[PV] = quad(self.calc_Sol,0,1,args=(PV,), points=points,epsrel=quad_eps, epsabs=quad_eps)[0]
 
         fig, ax = plt.subplots()
@@ -1189,7 +1348,7 @@ class FracFlow(object):
 
         return Savg, fig, ax
 
-    def plot_Savg(self, PVstart=0.0, PVend=2.0, ns = 101):
+    def plot_Savg(self, PVstart=0.0, PVend=2.0, eps=1e-4, ns = 101):
         '''
         This function plots the average water saturation as function of PV injected for
         an instance of FracFlow. The average water saturation is calculated using the
@@ -1204,7 +1363,8 @@ class FracFlow(object):
         Savg:       Savg vs PV data in the plot
         fig, ax:    figure and axes data of the plot
         '''
-        PVs = np.linspace(PVstart, PVend, ns)
+        PVs = self.calc_PVs(PVstart, PVend, eps, ns)
+
         Savg = pd.Series()
         for PV in PVs:
             Savg[PV] = self.calc_Savg(PV)
@@ -1218,7 +1378,7 @@ class FracFlow(object):
         ax.grid()
         return Savg, fig, ax
 
-    def plot_RF(self, PVstart=0.0, PVend=2.0, ns = 201):
+    def plot_RF(self, PVstart=0.0, PVend=2.0, eps=1e-4, ns = 201):
         '''
         This function plots the RF and BSW as function of PV injected for
         an instance of FracFlow. The RF is calculated wrt to both Swi and Scw as
@@ -1236,7 +1396,13 @@ class FracFlow(object):
         fig, ax:    figure and axes data of the plot
 
         '''
-        PVs = np.linspace(PVstart, PVend, ns)
+        def calc_BSW(fw):
+            # This function calculates the water cut at surface conditions
+            # Note that fw is the water cut at reservoir conditions
+            BSW = fw /( fw + self.Bw/self.Bo*(1.0-fw))
+            return BSW
+     
+        PVs = self.calc_PVs(PVstart, PVend, eps, ns)
 
         RF_Scw = pd.Series()
         RF_Swi = pd.Series()
@@ -1245,7 +1411,7 @@ class FracFlow(object):
         for PV in PVs:
             RF_Scw[PV] = self.calc_RF(PV)
             RF_Swi[PV] = self.calc_RF(PV,wrtSwi=True)
-            BSW[PV] = self.fw(self.calc_Sol(1,PV),self.calc_SolC(1,PV))
+            BSW[PV] = calc_BSW(self.fw(self.calc_Sol(1,PV),self.calc_SolC(1,PV)))
 
         fig, ax = plt.subplots()
         ax.plot(RF_Scw, 'r-', label = f'RF wrt Scw = {self.Scw:4.2f}')

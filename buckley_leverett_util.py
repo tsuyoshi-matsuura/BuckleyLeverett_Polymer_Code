@@ -39,7 +39,7 @@ def take_closest(myList, myNumber):
         return before
     
 def calc_NG(kabs=None, kroe= None, muo=None, rhow=None, rhoo=None,
-            qtot=None, area=None, dip=None, params_dict=None):
+            qtot=None, area=None, dip=None, Bw=1.0, params_dict=None):
     '''
     Calculate the dimensionless gravity number NG
 
@@ -49,9 +49,10 @@ def calc_NG(kabs=None, kroe= None, muo=None, rhow=None, rhoo=None,
     muo:  oil viscosity in cP
     rhow: water density in kg/m3
     rhoo: oil density in kg/m3
-    qtot: total flow rate in m3/day
+    qtot: total flow rate in sm3/day
     area: area perpendicular to the flow direction in m2
     dip:  dip angle in degrees, positive = anti-clockwise wrt horizontal
+    Bw:   formation volume factor of water, should be specified in rm3/sm3.
 
     These parameters can either be set individually by keyword when calling calc_NG or
     using a dictionary 'params_dict'. Priority is given to setting the parameters
@@ -79,6 +80,8 @@ def calc_NG(kabs=None, kroe= None, muo=None, rhow=None, rhoo=None,
         qtot  = qtot  if qtot  is not None else params_dict.get('qtot')
         area  = area  if area  is not None else params_dict.get('area')
         dip   = dip   if dip   is not None else params_dict.get('dip')
+        # For Bw, keep the default if not provided
+        Bw   = params_dict.get('Bw', Bw)
 
     # Check for None values and raise an error specifying which parameter is missing
     missing_params = [name for name, value in zip(
@@ -95,20 +98,22 @@ def calc_NG(kabs=None, kroe= None, muo=None, rhow=None, rhoo=None,
     if kroe <=0:
         errors['kroe'] = 'kroe must be larger than 0'
     if muo <=0:
-        errors['muo'] = 'muo must be larger than 0'
+        errors['muo']  = 'muo must be larger than 0'
     if rhow <=0:
         errors['rhow'] = 'rhow must be larger than 0'
     if rhoo <=0:
         errors['rhoo'] = 'rhoo must be larger than 0'
-    if qtot <0: 
+    if qtot <=0: 
         errors['qtot'] = 'qtot must be larger than 0'
-    if area <0: 
-        errors['qtot'] = 'qtot must be larger than 0'
+    if area <=0: 
+        errors['area'] = 'area must be larger than 0'
+    if Bw <=0: 
+        errors['Bw']   = 'Bw must be larger than 0'
 
     if errors:
         raise ValueError('\n'.join([f'{param}: {msg}' for param, msg in errors.items()]))
 
-    return  (kabs*mD_m2) * kroe * g * (rhow-rhoo) / (muo*cP_PaS) * area / (qtot/d_s) * np.sin(dip*deg_rad)
+    return  (kabs*mD_m2) * kroe * g * (rhow-rhoo) / (muo*cP_PaS) * area / (qtot*Bw/d_s) * np.sin(dip*deg_rad)
     
 # Main component of the Buckley Leverett utilities
 
@@ -121,17 +126,16 @@ class BuckleyLeverett(object):
     The following parameters are required to set up the Buckley Leverett model:
         krwe, nw, Scw:  water relperm
         kroe, no, Sorw: oil relperm
-        muo, muw:       viscosities of oil, water and polymer solution 
-                        polymer solution viscosity is at injection concentration
+        muo, muw:       viscosities of oil and water. They should be specified in cP.
+        Bw, Bo:         formation volume factors of water resp. oil. They should
+                        be specified in rm3/sm3. They are only used for the calculation of
+                        the water cut at reservoir conditions.
+        GravOn:         flag to indicate whether gravity effects are included
+        NG:             dimensionless gravity number, including the effect of the dip angle
         nSw:            number of water saturation values used in the look-up
                         table for rarefaction wave calculations. By default nSw=5001.
-        GravOn:         flag to indicate if gravity effects are included
-        NG:             dimensionless gravity number, including dip angle
         eps*, xtol:     numerical parameters, normally the default values are fine.
         debug:          flag to print debug information
-
-    For the input of the viscosity it is not relevant which unit is used, as long
-    as for both viscosities the same unit is used.
         
     These parameters can either be set individually by keyword when calling
     BuckleyLeverett or using a dictionary 'params_dict'. Priority is given to setting
@@ -142,16 +146,15 @@ class BuckleyLeverett(object):
     equal to the connate water saturation: Swi = Scw.
     If the solution at another initial water saturation is required, it can be changed using
     the method 'set_Swi(Swi)' which will change the initial water saturation in the instance of
-    FracFlow to the desired value and update all calculations to reflect this change.
-    N.B.: if gravity is included, it is not allowed to change Swi to another value than Scw.
+    BuckleyLeverett to the desired value and update all calculations to reflect this change.
 
     Note that changing any of the other parameters in an instance of BuckleyLeverett will not
     trigger a re-calculation, but can mess up the calculations. Therefore, it is recommended
-    to create a new instance of FracFlow if any of the parameters need to be changed.
+    to create a new instance of BuckleyLeverett if any of the parameters need to be changed.
     '''
 
     def __init__(self, krwe=None, nw=None, Scw=None, kroe=None, no=None, Sorw=None,
-                 muo=None, muw=None, GravOn= False, NG=0, nSw=5001, 
+                 muo=None, muw=None, Bw=1.0, Bo=1.0, GravOn= False, NG=0, nSw=5001, 
                  eps_Sw1=1e-8, epsSvel =1e-8, xtol=1e-15,
                  params_dict=None, debug = False):
 
@@ -166,6 +169,8 @@ class BuckleyLeverett(object):
             muo  = muo  if muo  is not None else params_dict.get('muo')
             muw  = muw  if muw  is not None else params_dict.get('muw')
             # For the following parameters, keep the default if not provided
+            Bw      = params_dict.get('Bw', Bw)
+            Bo      = params_dict.get('Bo', Bo)
             GravOn  = params_dict.get('GravOn', GravOn)
             NG      = params_dict.get('NG', NG)
             nSw     = params_dict.get('nSw', nSw) 
@@ -189,6 +194,8 @@ class BuckleyLeverett(object):
         self.Sorw   = Sorw  # residual oil saturation
         self.muo    = muo   # oil viscosity 
         self.muw    = muw   # water viscosity
+        self.Bo     = Bo    # oil formation volume factor
+        self.Bw     = Bw    # water formation volume factor
         self.GravOn = GravOn # flag to indicate gravity effects are included
         self.NG     = NG    # dimensionless gravity number
         self.nSw    = nSw   # number of saturation values in the lookup tables for rarefaction
@@ -211,6 +218,10 @@ class BuckleyLeverett(object):
             errors['muo'] = 'muo must be larger than 0'
         if self.muw <=0:
             errors['muw'] = 'muw must be larger than 0'
+        if self.Bo <=0:
+            errors['Bo'] = 'Bo must be larger than 0'
+        if self.Bw <=0:
+            errors['Bw'] = 'Bw must be larger than 0'
         if self.Scw >= 1-self.Sorw:
             errors['Scw_Sorw'] = 'Scw must be less than 1-Sorw'
 
@@ -725,7 +736,6 @@ class BuckleyLeverett(object):
                 xs = np.append(xs,np.linspace(points[0]+eps,xend,10))
             else:
                 xs = np.linspace(xstart,xend,ns)
-            # xs = np.linspace(xstart,xend,ns)
             for x in xs:
                 data[x] = self.calc_Sol(x,t)
             ax.plot(data, 'b-', label='Sw profile')
@@ -786,7 +796,7 @@ class BuckleyLeverett(object):
             PVs = np.append(PVs,np.linspace(tB+eps,PVend,ns))
         else:
             PVs = np.linspace(PVstart,PVend,ns)
-        # PVs = np.linspace(PVstart,PVend,ns)
+            
         Savg = pd.Series()
         for PV in PVs:
             points = self.calc_quad_points(PV)
@@ -860,8 +870,7 @@ class BuckleyLeverett(object):
             PVs = np.append(PVs,np.linspace(tB+eps,PVend,ns))
         else:
             PVs = np.linspace(PVstart,PVend,ns)
-        # PVs = np.linspace(PVstart,PVend,ns)
-        #
+
         Savg = pd.Series()
         for PV in PVs:
             Savg[PV] = self.calc_Savg(PV)
@@ -893,6 +902,12 @@ class BuckleyLeverett(object):
         fig, ax:    figure and axes data of the plot
 
         '''
+        def calc_BSW(fw):
+            # This function calculates the water cut at surface conditions
+            # Note that fw is the water cut at reservoir conditions
+            BSW = fw /( fw + self.Bw/self.Bo*(1.0-fw))
+            return BSW
+        
         tB = self.calc_tB()
         if (tB>PVstart) and (tB<PVend):
             PVs = np.linspace(PVstart,tB-eps,10)
@@ -900,7 +915,7 @@ class BuckleyLeverett(object):
             PVs = np.append(PVs,np.linspace(tB+eps,PVend,ns))
         else:
             PVs = np.linspace(PVstart,PVend,ns)
-        # PVs = np.linspace(PVstart,PVend,ns)
+
         RF_Scw = pd.Series()
         RF_Swi = pd.Series()
         BSW = pd.Series()
@@ -908,7 +923,7 @@ class BuckleyLeverett(object):
         for PV in PVs:
             RF_Scw[PV] = self.calc_RF(PV)
             RF_Swi[PV] = self.calc_RF(PV,wrtSwi=True)
-            BSW[PV] = self.fw(self.calc_Sol(1,PV))
+            BSW[PV] = calc_BSW(self.fw(self.calc_Sol(1,PV)))
 
         fig, ax = plt.subplots()
         ax.plot(RF_Scw, 'r-', label = f'RF wrt Scw = {self.Scw:4.2f}')
