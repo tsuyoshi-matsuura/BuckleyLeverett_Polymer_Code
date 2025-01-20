@@ -1,4 +1,1 @@
-Testing Latex
-$$
-\frac{x}{y} = x/y
-$$
+Testing Latex $\frac{x}{y} = x/y$
