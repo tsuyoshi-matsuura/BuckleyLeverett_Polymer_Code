@@ -4,6 +4,7 @@ In this repository Python code is provided for the solutions to the Buckley Leve
 
 ## Buckley Leverett equation
 
+<<<<<<< HEAD
 The Buckley Leverett equation including gravity effects is given by:
 ```math
 \dfrac{A \phi}{q}\dfrac{\partial S_w}{\partial t} + \dfrac{\partial f_w}{\partial S_w}\dfrac{\partial S_w}{\partial x} =0
@@ -49,6 +50,11 @@ With the above the equation becomes:
 ## The polymer model equation
 
 The polymer model with adsorption is described by the following equations:
+=======
+## Equations
+
+The following equations need to be solved:
+>>>>>>> 418b60cb6863498455055583b558c5551e32ded9
 ```math
 \begin{cases}
  \phi \dfrac{\partial}{\partial t}\left( S_w \right) + u \dfrac{\partial}{\partial x}\left( f_w \right) = 0 \\
