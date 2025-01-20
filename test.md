@@ -1,4 +1,4 @@
 Testing Latex
 $$
-\frec{x}{y} = x/y
+\frsc{x}{y} = x/y
 $$
