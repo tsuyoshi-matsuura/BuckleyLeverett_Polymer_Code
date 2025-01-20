@@ -3,6 +3,13 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+$ Take out the pdf files
+01_Buckley_Leverett_Polymer_Summary.pdf
+02_Buckley_Leverett.pdf
+03_Polymer.pdf
+04_Surfactant_Scouting.pdf
+05_The solution of the riemann problem for a hyperbolic system of conservation laws modeling polymer flooding.pdf
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
