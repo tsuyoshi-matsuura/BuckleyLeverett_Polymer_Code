@@ -9,12 +9,14 @@ Johansen, Thormod, and Ragnar Winther. “The Solution of the Riemann Problem fo
 ## Equations
 
 The following equations need to be solved:
-$math\begin{cases}
+```math
+\begin{cases}
  \phi \dfrac{\partial}{\partial t}\left( S_w \right) + u \dfrac{\partial}{\partial x}\left( f_w \right) = 0 \\
  \\
  \phi \dfrac{\partial}{\partial t}\left( S_w C_w + \dfrac{(1-\phi)}{\phi})\dfrac{\rho_s}{\rho_w} C_s \right) + u \dfrac{\partial}{\partial x}(f_w C_w) = 0
 
-\end{cases}$
+\end{cases}
+```
 with the boundary and initial conditions:
 $$
 \begin{cases}
