@@ -1,2 +1,2 @@
 Testing Latex 
-$\frac{x}{y} = x/y$
+$$\frac{x}{y} = x/y$$
