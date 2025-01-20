@@ -18,14 +18,14 @@ The following equations need to be solved:
 \end{cases}
 ```
 with the boundary and initial conditions:
-$$
+```math
 \begin{cases}
 S_w(0,t) &= S_{winj} = 1 - S_{orw} \\
 C_w(0,t) &= C_{inj} \\
 S_w(x,0) &= S_{wi} \\
 C(_wx,0) &= 0 
 \end{cases}
-$$
+``
 with $t \geq 0$ and $ 0 \leq x \leq L$.
 
 In the above equations $S_w$, $C_w$ and $C_s$ are the water saturation, polymer mass fractions in the water resp. solid. Moreover, $u$ is the total fluid rate, $\phi$ the porosity and $\rho_w$ and $\rho_s$ are the water resp. rock densities. $f_w$ is the fractional flow of water, given by:
