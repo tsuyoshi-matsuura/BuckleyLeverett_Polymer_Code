@@ -1,4 +1,4 @@
 Testing Latex
 $$
-\frsc{x}{y} = x/y
+\frac{x}{y} = x/y
 $$
